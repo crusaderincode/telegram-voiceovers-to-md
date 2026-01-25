@@ -7,7 +7,7 @@ from typing import Dict, Optional, List
 from loguru import logger
 
 from config.settings import Settings
-from config.prompts import SYSTEM_PROMPT_REMEMBER, SYSTEM_PROMPT_RECORD, USER_PROMPT_TEMPLATE, SIMPLE_PROMPT_TEMPLATE
+from config.prompts import SYSTEM_PROMPT_SUMMARIZE, SYSTEM_PROMPT_RECORD, USER_PROMPT_TEMPLATE, SIMPLE_PROMPT_TEMPLATE
 
 
 class SemanticProcessor:
@@ -71,12 +71,13 @@ class SemanticProcessor:
                 mode = 'record'
                 # Убираем команду из начала
                 clean_transcription = re.sub(r'^(запиши|записать)\s*[.,!-]?\s*', '', clean_transcription, flags=re.IGNORECASE)
-            elif lower_trans.startswith(('запомни', 'запомнить')):
-                mode = 'remember'
+            elif lower_trans.startswith(('перескажи', 'пересказать', 'запомни', 'запомнить')):
+                # Поддерживаем и старое "запомни" для совместимости, но основное "перескажи"
+                mode = 'summarize'
                 # Убираем команду из начала
-                clean_transcription = re.sub(r'^(запомни|запомнить)\s*[.,!-]?\s*', '', clean_transcription, flags=re.IGNORECASE)
+                clean_transcription = re.sub(r'^(перескажи|пересказать|запомни|запомнить)\s*[.,!-]?\s*', '', clean_transcription, flags=re.IGNORECASE)
             
-            base_system_prompt = SYSTEM_PROMPT_RECORD if mode == 'record' else SYSTEM_PROMPT_REMEMBER
+            base_system_prompt = SYSTEM_PROMPT_RECORD if mode == 'record' else SYSTEM_PROMPT_SUMMARIZE
             
             # Формируем список категорий для промпта
             categories_str = '\n'.join([f'- "{cat}"' for cat in available_categories])

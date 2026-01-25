@@ -14,10 +14,7 @@ from bot import BotHandlers
 from utils import setup_logging
 
 
-def signal_handler(signum, frame):
-    """Обработка сигналов завершения"""
-    logger.info(f"Received signal {signum}, shutting down...")
-    sys.exit(0)
+# Обработчики сигналов теперь встроены в основной цикл asyncio
 
 
 async def startup():
@@ -45,7 +42,15 @@ async def shutdown(application: Application):
     """Действия при остановке"""
     logger.info("Shutting down bot...")
     
-    # Очистка ресурсов
+    # Сначала останавливаем обновление (Updater)
+    if application.updater and application.updater.running:
+        await application.updater.stop()
+    
+    # Затем останавливаем само приложение
+    if application.running:
+        await application.stop()
+        
+    # Финальная очистка ресурсов
     await application.shutdown()
     
     logger.info("Bot stopped")
@@ -57,12 +62,10 @@ async def main():
     # Настройка логирования
     setup_logging()
     
-    # Регистрация обработчиков сигналов
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
     # Startup
     await startup()
+    
+    application = None
     
     try:
         # Создание приложения
@@ -107,7 +110,8 @@ async def main():
         sys.exit(1)
     
     finally:
-        await shutdown(application)
+        if application:
+            await shutdown(application)
 
 
 if __name__ == '__main__':

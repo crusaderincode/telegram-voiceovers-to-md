@@ -10,8 +10,11 @@ from telegram.ext import (
     CommandHandler,
     MessageHandler,
     ContextTypes,
-    filters
+    ContextTypes,
+    filters,
+    ConversationHandler
 )
+from telegram import ReplyKeyboardMarkup
 
 from config.settings import Settings
 from processors import (
@@ -27,6 +30,9 @@ from .auth import authorized_filter, is_authorized_update
 
 class BotHandlers:
     """Обработчики команд и сообщений Telegram бота"""
+    
+    # Состояния для разговора
+    WAITING_CATEGORY_NAME = 1
     
     def __init__(self):
         self.audio_processor = AudioProcessor()
@@ -47,7 +53,7 @@ class BotHandlers:
             "1. Запишите голосовое сообщение\n"
             "2. В начале сообщения можно сказать тип обработки:\n"
             "   - **'Запиши'** ... - записать дословно\n"
-            "   - **'Запомни'** ... - сделать конспект (по умолчанию)\n"
+            "   - **'Перескажи'** ... - сделать конспект (по умолчанию)\n"
             "3. Я обработаю аудио и сохраню заметку\n\n"
             "📚 **Доступные команды:**\n"
             "/start - Справка\n"
@@ -59,7 +65,13 @@ class BotHandlers:
             "🎙️ Отправьте голосовое сообщение для начала!"
         )
         
-        await update.message.reply_text(welcome_message, parse_mode='Markdown')
+        keyboard = [
+            ['📊 Статистика', '📂 Категории'],
+            ['➕ Добавить категорию', '💚 Состояние']
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        
+        await update.message.reply_text(welcome_message, parse_mode='Markdown', reply_markup=reply_markup)
         logger.info(f"User {update.effective_user.id} started the bot")
     
     async def process_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -247,6 +259,45 @@ class BotHandlers:
         else:
             await update.message.reply_text(f"❌ Не удалось создать категорию '{category_name}'")
 
+    async def start_add_category(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Начало процесса добавления категории"""
+        if not is_authorized_update(update):
+            await update.message.reply_text("❌ Доступ запрещен")
+            return ConversationHandler.END
+            
+        await update.message.reply_text(
+            "✍️ Введите название для новой категории:",
+            parse_mode='Markdown'
+        )
+        return self.WAITING_CATEGORY_NAME
+
+    async def handle_new_category_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка названия категории"""
+        if not is_authorized_update(update):
+            return ConversationHandler.END
+            
+        category_name = update.message.text.strip()
+        
+        # Проверка на отмену
+        if category_name.lower() == 'отмена':
+            await update.message.reply_text("❌ Создание категории отменено")
+            return ConversationHandler.END
+        
+        if self.file_manager.create_category(category_name):
+            await update.message.reply_text(f"✅ Категория '{category_name}' создана!")
+        else:
+            await update.message.reply_text(
+                f"❌ Не удалось создать категорию '{category_name}'.\n"
+                "Возможно такое имя недопустимо или категория уже существует."
+            )
+            
+        return ConversationHandler.END
+
+    async def cancel_add_category(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Отмена добавления категории"""
+        await update.message.reply_text("❌ Операция отменена")
+        return ConversationHandler.END
+
     async def list_categories(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Команда /categories - список категорий"""
         if not is_authorized_update(update):
@@ -302,6 +353,29 @@ class BotHandlers:
     def register_handlers(self, application: Application):
         """Регистрация всех обработчиков"""
         
+        # Conversation Handler для добавления категории (Регистрируем первым!)
+        add_category_handler = ConversationHandler(
+            entry_points=[
+                MessageHandler(
+                    filters.Regex('^➕ Добавить категорию$') & authorized_filter,
+                    self.start_add_category
+                )
+            ],
+            states={
+                self.WAITING_CATEGORY_NAME: [
+                    MessageHandler(
+                        filters.TEXT & ~filters.COMMAND & authorized_filter,
+                        self.handle_new_category_name
+                    )
+                ]
+            },
+            fallbacks=[
+                CommandHandler('cancel', self.cancel_add_category, filters=authorized_filter),
+                MessageHandler(filters.COMMAND & authorized_filter, self.cancel_add_category)
+            ]
+        )
+        application.add_handler(add_category_handler)
+        
         # Команды
         application.add_handler(
             CommandHandler('start', self.start, filters=authorized_filter)
@@ -321,6 +395,28 @@ class BotHandlers:
 
         application.add_handler(
             CommandHandler('health', self.health, filters=authorized_filter)
+        )
+        
+        # Кнопки меню
+        application.add_handler(
+            MessageHandler(
+                filters.Regex('^📊 Статистика$') & authorized_filter,
+                self.stats
+            )
+        )
+        application.add_handler(
+            MessageHandler(
+                filters.Regex('^📂 Категории$') & authorized_filter,
+                self.list_categories
+            )
+        )
+        
+
+        application.add_handler(
+            MessageHandler(
+                filters.Regex('^💚 Состояние$') & authorized_filter,
+                self.health
+            )
         )
         
         # Голосовые сообщения
