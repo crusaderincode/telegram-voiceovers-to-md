@@ -21,7 +21,7 @@ from processors import (
     TranscriptionValidator
 )
 from storage import FileManager
-from utils import check_resources, cleanup_temp_files
+from utils import check_resources
 from .auth import authorized_filter, is_authorized_update
 
 
@@ -45,14 +45,14 @@ class BotHandlers:
             "👋 Привет! Я бот для создания заметок из голосовых сообщений.\n\n"
             "📝 **Как использовать:**\n"
             "1. Запишите голосовое сообщение\n"
-            "2. Назовите категорию в начале: *идеи*, *жизнь*, *работа*\n"
+            "2. В начале сообщения можно сказать тип обработки:\n"
+            "   - **'Запиши'** ... - записать дословно\n"
+            "   - **'Запомни'** ... - сделать конспект (по умолчанию)\n"
             "3. Я обработаю аудио и сохраню заметку\n\n"
             "📚 **Доступные команды:**\n"
             "/start - Справка\n"
             "/stats - Статистика заметок\n"
             "/search <запрос> - Поиск по заметкам\n"
-            "/move <файл> <категория> - Переместить заметку\n"
-            "/cleanup - Очистить временные файлы\n"
             "/health - Проверка системы\n\n"
             "🎙️ Отправьте голосовое сообщение для начала!"
         )
@@ -217,55 +217,7 @@ class BotHandlers:
         await update.message.reply_text(message, parse_mode='Markdown')
         logger.info(f"Search: '{query}' - {len(results)} results")
     
-    async def move(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Команда /move - перемещение заметки"""
-        if not is_authorized_update(update):
-            await update.message.reply_text("❌ Доступ запрещен")
-            return
-        
-        if len(context.args) != 2:
-            await update.message.reply_text(
-                "Использование: /move <файл> <категория>\n"
-                "Пример: /move заметка_2024-01-25.md идеи"
-            )
-            return
-        
-        filename, new_category = context.args
-        
-        if new_category not in Settings.CATEGORIES:
-            categories = ', '.join(Settings.CATEGORIES)
-            await update.message.reply_text(
-                f"❌ Неверная категория\n"
-                f"Доступные: {categories}"
-            )
-            return
-        
-        # Ищем файл во всех категориях
-        found = False
-        for old_category in Settings.CATEGORIES:
-            if self.file_manager.move_note(filename, old_category, new_category):
-                found = True
-                emoji = Settings.CATEGORY_EMOJI[new_category]
-                await update.message.reply_text(
-                    f"{emoji} Заметка перемещена: {old_category} → {new_category}"
-                )
-                break
-        
-        if not found:
-            await update.message.reply_text(f"❌ Файл '{filename}' не найден")
-    
-    async def cleanup(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Команда /cleanup - очистка временных файлов"""
-        if not is_authorized_update(update):
-            await update.message.reply_text("❌ Доступ запрещен")
-            return
-        
-        deleted_count = cleanup_temp_files()
-        
-        await update.message.reply_text(
-            f"🧹 Удалено временных файлов: {deleted_count}"
-        )
-        logger.info(f"Cleanup: {deleted_count} files deleted")
+
     
     async def health(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Команда /health - проверка системы"""
@@ -314,12 +266,7 @@ class BotHandlers:
         application.add_handler(
             CommandHandler('search', self.search, filters=authorized_filter)
         )
-        application.add_handler(
-            CommandHandler('move', self.move, filters=authorized_filter)
-        )
-        application.add_handler(
-            CommandHandler('cleanup', self.cleanup, filters=authorized_filter)
-        )
+
         application.add_handler(
             CommandHandler('health', self.health, filters=authorized_filter)
         )

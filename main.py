@@ -11,7 +11,7 @@ from telegram.ext import Application
 
 from config.settings import Settings
 from bot import BotHandlers
-from utils import setup_logging, cleanup_temp_files
+from utils import setup_logging
 
 
 def signal_handler(signum, frame):
@@ -34,10 +34,7 @@ async def startup():
         logger.error(f"Configuration error: {e}")
         sys.exit(1)
     
-    # Очистка старых временных файлов
-    deleted = cleanup_temp_files()
-    if deleted > 0:
-        logger.info(f"✓ Cleaned up {deleted} old temporary files")
+
     
     logger.info(f"✓ Notes directory: {Settings.NOTES_DIR}")
     logger.info(f"✓ Allowed user ID: {Settings.ALLOWED_USER_ID}")

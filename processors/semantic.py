@@ -7,7 +7,7 @@ from typing import Dict, Optional
 from loguru import logger
 
 from config.settings import Settings
-from config.prompts import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE, SIMPLE_PROMPT_TEMPLATE
+from config.prompts import SYSTEM_PROMPT_REMEMBER, SYSTEM_PROMPT_RECORD, USER_PROMPT_TEMPLATE, SIMPLE_PROMPT_TEMPLATE
 
 
 class SemanticProcessor:
@@ -58,11 +58,29 @@ class SemanticProcessor:
         try:
             logger.debug(f"Processing transcription ({len(transcription)} chars)")
             
+            # Определение режима и промпта
+            mode = 'remember' # Default
+            clean_transcription = transcription.strip()
+            
+            # Проверяем команды в начале
+            lower_trans = clean_transcription.lower()
+            if lower_trans.startswith(('запиши', 'записать')):
+                mode = 'record'
+                # Убираем команду из начала
+                clean_transcription = re.sub(r'^(запиши|записать)\s*[.,!-]?\s*', '', clean_transcription, flags=re.IGNORECASE)
+            elif lower_trans.startswith(('запомни', 'запомнить')):
+                mode = 'remember'
+                # Убираем команду из начала
+                clean_transcription = re.sub(r'^(запомни|запомнить)\s*[.,!-]?\s*', '', clean_transcription, flags=re.IGNORECASE)
+            
+            system_prompt = SYSTEM_PROMPT_RECORD if mode == 'record' else SYSTEM_PROMPT_REMEMBER
+            logger.info(f"Using mode: {mode} for transcription")
+
             # Формируем промпт
-            user_prompt = USER_PROMPT_TEMPLATE.format(transcription=transcription)
+            user_prompt = USER_PROMPT_TEMPLATE.format(transcription=clean_transcription)
             
             # Запрос к модели
-            result = self._run_llm(SYSTEM_PROMPT, user_prompt, format_json=True)
+            result = self._run_llm(system_prompt, user_prompt, format_json=True)
             
             # Парсинг JSON ответа
             response = self._parse_json_response(result)
