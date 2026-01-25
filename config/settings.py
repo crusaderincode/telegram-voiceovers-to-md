@@ -47,7 +47,7 @@ class Settings:
     CLEANUP_TEMP_FILES_HOURS: int = int(os.getenv('CLEANUP_TEMP_FILES_HOURS', '24'))
     
     # Категории
-    CATEGORIES = ['идеи', 'жизнь', 'работа', 'инбокс']
+
     CATEGORY_EMOJI = {
         'идеи': '💡',
         'жизнь': '🌱',
@@ -68,8 +68,7 @@ class Settings:
         for directory in [cls.AUDIO_DIR, cls.TRANSCRIPTIONS_DIR, cls.LOGS_DIR]:
             directory.mkdir(parents=True, exist_ok=True)
         
-        for category in cls.CATEGORIES:
-            (cls.NOTES_DIR / category).mkdir(parents=True, exist_ok=True)
+
         
         return True
 

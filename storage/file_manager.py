@@ -19,14 +19,42 @@ class FileManager:
         """
         self.notes_dir = notes_dir or Settings.NOTES_DIR
         self._ensure_directories()
+        
+    def get_categories(self) -> list[str]:
+        """Получить список доступных категорий"""
+        categories = []
+        if self.notes_dir.exists():
+            for item in self.notes_dir.iterdir():
+                if item.is_dir() and not item.name.startswith('.'):
+                    categories.append(item.name.lower())
+        
+        # Если категорий нет, возвращаем дефолтные (на всякий случай)
+        if not categories:
+            return ['инбокс']
+            
+        return sorted(categories)
+
+    def create_category(self, name: str) -> bool:
+        """Создать новую категорию"""
+        clean_name = self.sanitize_title(name, max_length=30).lower()
+        if not clean_name:
+            return False
+            
+        new_dir = self.notes_dir / clean_name
+        try:
+            new_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Created category: {clean_name}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to create category {clean_name}: {e}")
+            return False
     
     def _ensure_directories(self):
-        """Создание необходимых директорий"""
+        """Создание базовых директорий"""
         self.notes_dir.mkdir(parents=True, exist_ok=True)
-        
-        for category in Settings.CATEGORIES:
-            category_dir = self.notes_dir / category
-            category_dir.mkdir(parents=True, exist_ok=True)
+        # Создаем 'инбокс' если совсем пусто
+        if not any(self.notes_dir.iterdir()):
+             (self.notes_dir / 'инбокс').mkdir(exist_ok=True)
     
     @staticmethod
     def sanitize_title(title: str, max_length: int = 50) -> str:
@@ -110,9 +138,13 @@ class FileManager:
             timestamp = datetime.now()
         
         # Валидация категории
-        if category not in Settings.CATEGORIES:
+        # Валидация категории
+        available_categories = self.get_categories()
+        if category not in available_categories:
             logger.warning(f"Invalid category '{category}', using 'инбокс'")
             category = 'инбокс'
+            # Убедимся что инбокс существует
+            (self.notes_dir / 'инбокс').mkdir(exist_ok=True)
         
         category_dir = self.notes_dir / category
         
@@ -206,7 +238,7 @@ class FileManager:
         else:
             # Все заметки
             total = 0
-            for cat in Settings.CATEGORIES:
+            for cat in self.get_categories():
                 total += self.get_notes_count(cat)
             return total
     
@@ -218,7 +250,7 @@ class FileManager:
             dict: Статистика по категориям
         """
         stats = {}
-        for category in Settings.CATEGORIES:
+        for category in self.get_categories():
             stats[category] = self.get_notes_count(category)
         stats['total'] = sum(stats.values())
         return stats
@@ -237,7 +269,7 @@ class FileManager:
         query = query.lower()
         results = []
         
-        categories = [category] if category else Settings.CATEGORIES
+        categories = [category] if category else self.get_categories()
         
         for cat in categories:
             category_dir = self.notes_dir / cat

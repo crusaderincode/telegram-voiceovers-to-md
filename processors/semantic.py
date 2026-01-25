@@ -2,7 +2,7 @@
 import json
 import re
 import subprocess
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 from loguru import logger
 
@@ -45,7 +45,7 @@ class SemanticProcessor:
         except Exception as e:
             logger.warning(f"Could not verify model: {e}")
     
-    def process(self, transcription: str) -> Dict[str, str]:
+    def process(self, transcription: str, available_categories: List[str] = None) -> Dict[str, str]:
         """
         Обработка транскрипции с извлечением структуры
         
@@ -57,6 +57,9 @@ class SemanticProcessor:
         """
         try:
             logger.debug(f"Processing transcription ({len(transcription)} chars)")
+            
+            if not available_categories:
+                available_categories = ['инбокс']
             
             # Определение режима и промпта
             mode = 'remember' # Default
@@ -73,7 +76,12 @@ class SemanticProcessor:
                 # Убираем команду из начала
                 clean_transcription = re.sub(r'^(запомни|запомнить)\s*[.,!-]?\s*', '', clean_transcription, flags=re.IGNORECASE)
             
-            system_prompt = SYSTEM_PROMPT_RECORD if mode == 'record' else SYSTEM_PROMPT_REMEMBER
+            base_system_prompt = SYSTEM_PROMPT_RECORD if mode == 'record' else SYSTEM_PROMPT_REMEMBER
+            
+            # Формируем список категорий для промпта
+            categories_str = '\n'.join([f'- "{cat}"' for cat in available_categories])
+            system_prompt = base_system_prompt.format(categories=categories_str)
+            
             logger.info(f"Using mode: {mode} for transcription")
 
             # Формируем промпт
@@ -87,7 +95,7 @@ class SemanticProcessor:
             
             if response:
                 # Валидация категории
-                if response['category'] not in Settings.CATEGORIES:
+                if response['category'] not in available_categories:
                     logger.warning(f"Invalid category: {response['category']}, using 'инбокс'")
                     response['category'] = 'инбокс'
                 
@@ -186,10 +194,13 @@ class SemanticProcessor:
             # Валидация структуры
             required_fields = ['category', 'title', 'content']
             if all(field in data for field in required_fields):
+                content = self._clean_content(str(data['content']))
+                title = str(data['title']).strip()
+                
                 return {
                     'category': str(data['category']).lower(),
-                    'title': str(data['title']),
-                    'content': str(data['content'])
+                    'title': title,
+                    'content': content
                 }
             else:
                 logger.warning(f"Missing required fields in JSON: {data.keys()}")
@@ -201,6 +212,44 @@ class SemanticProcessor:
         except Exception as e:
             logger.error(f"Unexpected error parsing JSON: {e}")
             return None
+
+    def _clean_content(self, content: str) -> str:
+        """
+        Очистка содержимого от артефактов LLM
+        
+        Args:
+            content: Исходный текст контента
+            
+        Returns:
+            str: Очищенный текст
+        """
+        # 1. Убираем "разговорные" префиксы
+        prefixes_to_remove = [
+            r'^пересказ(у|жу)?\s*заметки:\s*',
+            r'^вот\s*пересказ:\s*',
+            r'^вот\s*текст:\s*',
+            r'^заметка:\s*',
+            r'^текст:\s*',
+            r'^контент:\s*',
+            r'^обработанный\s*текст:\s*'
+        ]
+        
+        for p in prefixes_to_remove:
+            content = re.sub(p, '', content, flags=re.IGNORECASE | re.MULTILINE).strip()
+            
+        # 2. Убираем утечки системного промпта в конце (иногда модель дописывает инструкции)
+        # Ищем фразы типа "Верни ТОЛЬКО JSON..." или "Ответ должен быть..." в конце текста
+        prompt_leaks = [
+            r'верни\s+только\s+json.*$',
+            r'ответ\s+должен\s+быть.*$',
+            r'никаких\s+дополнительных\s+комментариев.*$',
+            r'не\s+добавляй\s+никаких.*$'
+        ]
+        
+        for p in prompt_leaks:
+            content = re.sub(p, '', content, flags=re.IGNORECASE | re.DOTALL).strip()
+
+        return content
     
     def _fallback_processing(self, transcription: str) -> Dict[str, str]:
         """
@@ -221,12 +270,16 @@ class SemanticProcessor:
         # Ищем упоминания категорий в начале текста
         first_words = ' '.join(text_lower.split()[:10])
         
-        if any(word in first_words for word in ['идея', 'идеи', 'придумал', 'концепция', 'проект']):
-            category = 'идеи'
-        elif any(word in first_words for word in ['работа', 'задача', 'встреча', 'проект', 'коллега']):
+        if any(word in first_words for word in ['работа', 'задача', 'встреча', 'проект']):
             category = 'работа'
-        elif any(word in first_words for word in ['купить', 'жизнь', 'личное', 'дом', 'семья', 'здоровье']):
-            category = 'жизнь'
+        elif any(word in first_words for word in ['идея', 'идеи', 'придумал']):
+            category = 'идеи'
+        
+        # Если такой категории нет, то инбокс
+        # (в fallback логике мы не знаем доступные категории точно, но если мы сюда упали, 
+        # значит LLM сломалась. Вернем инбокс или то что наэвристили если повезет)
+        # Для безопасности лучше вернуть инбокс, но оставим эвристику как hint
+        
         
         # Простой заголовок из первых слов
         words = transcription.split()[:5]

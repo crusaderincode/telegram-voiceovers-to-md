@@ -51,6 +51,8 @@ class BotHandlers:
             "3. Я обработаю аудио и сохраню заметку\n\n"
             "📚 **Доступные команды:**\n"
             "/start - Справка\n"
+            "/add\_category <имя> - Создать новую категорию\n"
+            "/categories - Список категорий\n"
             "/stats - Статистика заметок\n"
             "/search <запрос> - Поиск по заметкам\n"
             "/health - Проверка системы\n\n"
@@ -126,7 +128,11 @@ class BotHandlers:
             
             # 4. Семантическая обработка
             await status_msg.edit_text("🤖 Обрабатываю текст...")
-            processed = self.semantic_processor.process(transcription)
+            
+            # Получаем актуальные категории
+            categories = self.file_manager.get_categories()
+            
+            processed = self.semantic_processor.process(transcription, available_categories=categories)
             
             # 5. Сохранение заметки
             file_path = self.file_manager.save_note(
@@ -174,9 +180,11 @@ class BotHandlers:
         
         message = "📊 **Статистика заметок**\n\n"
         
-        for category in Settings.CATEGORIES:
-            emoji = Settings.CATEGORY_EMOJI[category]
-            count = stats[category]
+        categories = self.file_manager.get_categories()
+        
+        for category in categories:
+            emoji = Settings.CATEGORY_EMOJI.get(category, '📁')
+            count = stats.get(category, 0)
             message += f"{emoji} {category.capitalize()}: {count}\n"
         
         message += f"\n**Всего: {stats['total']}**"
@@ -219,6 +227,44 @@ class BotHandlers:
     
 
     
+    async def add_category(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /add_category - добавить категорию"""
+        if not is_authorized_update(update):
+            await update.message.reply_text("❌ Доступ запрещен")
+            return
+        
+        if not context.args:
+            await update.message.reply_text(
+                "Использование: /add_category <имя>\n"
+                "Пример: /add_category путешествия"
+            )
+            return
+        
+        category_name = context.args[0]
+        
+        if self.file_manager.create_category(category_name):
+            await update.message.reply_text(f"✅ Категория '{category_name}' создана!")
+        else:
+            await update.message.reply_text(f"❌ Не удалось создать категорию '{category_name}'")
+
+    async def list_categories(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Команда /categories - список категорий"""
+        if not is_authorized_update(update):
+            await update.message.reply_text("❌ Доступ запрещен")
+            return
+        
+        categories = self.file_manager.get_categories()
+        
+        if not categories:
+            await update.message.reply_text("📂 Категорий пока нет")
+            return
+        
+        message = "📂 **Доступные категории:**\n\n"
+        for category in categories:
+            emoji = Settings.CATEGORY_EMOJI.get(category, '📁')
+            message += f"{emoji} `{category}`\n"
+            
+        await update.message.reply_text(message, parse_mode='Markdown')
     async def health(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Команда /health - проверка системы"""
         if not is_authorized_update(update):
@@ -259,6 +305,12 @@ class BotHandlers:
         # Команды
         application.add_handler(
             CommandHandler('start', self.start, filters=authorized_filter)
+        )
+        application.add_handler(
+            CommandHandler('add_category', self.add_category, filters=authorized_filter)
+        )
+        application.add_handler(
+            CommandHandler('categories', self.list_categories, filters=authorized_filter)
         )
         application.add_handler(
             CommandHandler('stats', self.stats, filters=authorized_filter)
