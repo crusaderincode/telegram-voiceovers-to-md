@@ -1,0 +1,30 @@
+# Environment
+.env
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Data
+data/audio/*
+data/transcriptions/*
+data/logs/*
+!data/audio/.gitkeep
+!data/transcriptions/.gitkeep
+!data/logs/.gitkeep
+
+# Models
+models/whisper/*.bin
+models/whisper/*.coreml
+
+# Notes (опционально - закомментируйте если хотите версионировать)
+notes
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
