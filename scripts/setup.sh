@@ -175,7 +175,7 @@ echo ""
 echo "9️⃣  Initializing Semantic Search..."
 if [ -d "notes" ]; then
     echo "Indexing existing notes..."
-    python scripts/reindex.py
+    python storage/reindex.py
     echo -e "${GREEN}✓ Notes indexed${NC}"
 else
     echo "No notes found, skipping indexing."

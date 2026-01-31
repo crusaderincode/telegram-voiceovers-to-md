@@ -27,17 +27,27 @@ class WhisperTranscriber:
         """Проверка доступности whisper.cpp"""
         try:
             # Пробуем найти whisper executable
-            # Возможные варианты: whisper-cpp, main, ./whisper.cpp/main
-            executables = ['whisper-cpp', 'main', './whisper.cpp/main']
+            # Приоритет: то что в настройках, затем стандартные имена
+            executables = []
+            if Settings.WHISPER_EXECUTABLE:
+                executables.append(Settings.WHISPER_EXECUTABLE)
             
-            for exe in executables:
+            executables.extend(['whisper-cpp', 'whisper-cli', 'main', './whisper.cpp/main'])
+            
+            # Убираем дубликаты с сохранением порядка
+            seen = set()
+            unique_exes = [x for x in executables if not (x in seen or seen.add(x))]
+            
+            for exe in unique_exes:
                 try:
+                    # Некоторые версии whisper выплевывают помощь в stderr
                     result = subprocess.run(
                         [exe, '--help'],
                         capture_output=True,
                         timeout=5
                     )
-                    if result.returncode == 0 or 'usage' in result.stderr.decode().lower():
+                    output = (result.stdout.decode() + result.stderr.decode()).lower()
+                    if result.returncode == 0 or 'usage' in output or 'options' in output:
                         self.executable = exe
                         logger.info(f"Found whisper executable: {exe}")
                         return
@@ -46,7 +56,7 @@ class WhisperTranscriber:
             
             # Если ничего не нашли, используем значение из настроек
             self.executable = Settings.WHISPER_EXECUTABLE
-            logger.warning(f"Whisper executable not verified, using: {self.executable}")
+            logger.warning(f"Whisper executable not verified, using fallback: {self.executable}")
             
         except Exception as e:
             logger.warning(f"Could not verify whisper: {e}")

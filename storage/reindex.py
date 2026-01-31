@@ -19,7 +19,7 @@ async def reindex():
     
     # Initialize components
     vector_store = VectorStore()
-    vector_store.init_collection()
+    vector_store.recreate_collection()
     embeddings = OllamaEmbeddings()
     
     notes_dir = Settings.NOTES_DIR

@@ -232,16 +232,33 @@ class BotHandlers:
                 # 5. Генерация ответа
                 answer = self.semantic_processor.generate_answer_from_context(query, context_docs)
                 
-                final_response = f"🤖 **Ответ:**\n{answer}\n\n📂 Файлы с источниками ниже:"
-                await status_msg.edit_text(final_response, parse_mode='Markdown')
+                # Проверяем, нашел ли LLM ответ в этих файлах
+                no_info_markers = [
+                    "информации не найдено", 
+                    "нет информации", 
+                    "не нашел", 
+                    "к сожалению, я не могу",
+                    "информации недостаточно"
+                ]
                 
-                # Отправка самих файлов
-                if sources_paths:
-                    for path in sources_paths[:5]: # Ограничение 5 файлов чтоб не спамить
-                        try:
-                            await update.message.reply_document(document=path)
-                        except Exception as e:
-                            logger.error(f"Failed to send file {path}: {e}")
+                has_answer = not any(marker in answer.lower() for marker in no_info_markers)
+                
+                if has_answer:
+                    # Если ответ найден, пишем про файлы и прикрепляем их
+                    final_response = f"🤖 **Ответ:**\n{answer}\n\n📂 Файлы с источниками ниже:"
+                    await status_msg.edit_text(final_response, parse_mode='Markdown')
+                    
+                    # Отправка самих файлов
+                    if sources_paths:
+                        for path in sources_paths[:5]: # Ограничение 5 файлов чтоб не спамить
+                            try:
+                                await update.message.reply_document(document=path)
+                            except Exception as e:
+                                logger.error(f"Failed to send file {path}: {e}")
+                else:
+                    # Если информации нет, просто выводим ответ без файлов
+                    final_response = f"🤖 **Ответ:**\n{answer}"
+                    await status_msg.edit_text(final_response, parse_mode='Markdown')
                 
                 # Удаляем аудио, так как это был поисковый запрос
                 try:

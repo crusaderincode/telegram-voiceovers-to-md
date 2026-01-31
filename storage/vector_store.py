@@ -26,8 +26,12 @@ class VectorStore:
             logger.error(f"Failed to initialize Qdrant: {e}")
             raise
 
-    def init_collection(self, vector_size: int = 768):
-        """Initialize collection if it doesn't exist"""
+    def init_collection(self, vector_size: int = 768, force: bool = False):
+        """Initialize collection, optionally recreating it if force=True"""
+        if force and self.client.collection_exists(self.collection_name):
+            logger.warning(f"Forcing recreation of collection {self.collection_name}")
+            self.client.delete_collection(self.collection_name)
+
         if not self.client.collection_exists(self.collection_name):
             logger.info(f"Creating collection {self.collection_name} with size {vector_size}")
             self.client.create_collection(
@@ -36,6 +40,10 @@ class VectorStore:
             )
         else:
             logger.info(f"Collection {self.collection_name} already exists")
+
+    def recreate_collection(self, vector_size: int = 768):
+        """Force recreate the collection (clear all data)"""
+        self.init_collection(vector_size=vector_size, force=True)
 
     def add_note(self, 
                  note_id: str, 
