@@ -1,6 +1,10 @@
 #!/bin/bash
 # Скрипт для проверки статуса бота
 
+# Определение корневой директории проекта
+PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+cd "$PROJECT_ROOT"
+
 source venv/bin/activate 2>/dev/null || true
 
 echo "🔍 AI Notes Bot - System Check"

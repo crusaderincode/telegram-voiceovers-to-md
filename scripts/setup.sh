@@ -8,6 +8,12 @@ echo "AI Notes Bot - Setup Script"
 echo "================================"
 echo ""
 
+# Определение корневой директории проекта
+PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+cd "$PROJECT_ROOT"
+echo "📍 Project root: $PROJECT_ROOT"
+echo ""
+
 # Цвета для вывода
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'

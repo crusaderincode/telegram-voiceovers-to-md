@@ -3,17 +3,21 @@
 
 set -e
 
+# Определение корневой директории проекта (на уровень выше директории скрипта)
+PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+cd "$PROJECT_ROOT"
+
 # Активация виртуального окружения
 if [ -f "venv/bin/activate" ]; then
     source venv/bin/activate
 else
-    echo "❌ Virtual environment not found. Run ./scripts/setup.sh first"
+    echo "❌ Virtual environment not found in $PROJECT_ROOT. Run ./scripts/setup.sh first"
     exit 1
 fi
 
 # Проверка .env
 if [ ! -f ".env" ]; then
-    echo "❌ .env file not found. Copy .env.example and configure it"
+    echo "❌ .env file not found in $PROJECT_ROOT. Copy .env.example and configure it"
     exit 1
 fi
 
