@@ -99,6 +99,12 @@ ollama pull qwen2.5:3b
 
 echo -e "${GREEN}✓ Qwen model downloaded${NC}"
 
+# Embedding модель
+echo "Downloading Embedding model (nomic-embed-text)..."
+ollama pull nomic-embed-text
+
+echo -e "${GREEN}✓ Embedding model downloaded${NC}"
+
 # Whisper модель
 echo ""
 echo "Downloading Whisper model (large-v3)..."
@@ -160,8 +166,20 @@ echo "8️⃣  Creating directory structure..."
 touch data/audio/.gitkeep
 touch data/transcriptions/.gitkeep
 touch data/logs/.gitkeep
+mkdir -p data/qdrant_db
 
 echo -e "${GREEN}✓ Directory structure ready${NC}"
+
+# 9. Инициализация поиска (Reindex)
+echo ""
+echo "9️⃣  Initializing Semantic Search..."
+if [ -d "notes" ]; then
+    echo "Indexing existing notes..."
+    python scripts/reindex.py
+    echo -e "${GREEN}✓ Notes indexed${NC}"
+else
+    echo "No notes found, skipping indexing."
+fi
 
 # Финальное сообщение
 echo ""

@@ -7,7 +7,13 @@ from typing import Dict, Optional, List
 from loguru import logger
 
 from config.settings import Settings
-from config.prompts import SYSTEM_PROMPT_SUMMARIZE, SYSTEM_PROMPT_RECORD, USER_PROMPT_TEMPLATE, SIMPLE_PROMPT_TEMPLATE
+from config.prompts import (
+    SYSTEM_PROMPT_SUMMARIZE, 
+    SYSTEM_PROMPT_RECORD, 
+    USER_PROMPT_TEMPLATE, 
+    SIMPLE_PROMPT_TEMPLATE,
+    SYSTEM_PROMPT_SEARCH
+)
 
 
 class SemanticProcessor:
@@ -323,3 +329,36 @@ class SemanticProcessor:
             # Fallback - первые слова
             words = transcription.split()[:5]
             return ' '.join(words)
+
+    def generate_answer_from_context(self, query: str, context_docs: List[Dict]) -> str:
+        """
+        Генерация ответа на вопрос по контексту из заметок
+        
+        Args:
+            query: Вопрос пользователя
+            context_docs: Список найденных документов (с 'content' и 'title')
+            
+        Returns:
+            str: Ответ модели
+        """
+        if not context_docs:
+            return "К сожалению, я не нашел релевантной информации в ваших заметках."
+            
+        # Формирование контекста
+        context_text = ""
+        for i, doc in enumerate(context_docs, 1):
+            title = doc.get('title', 'Без названия')
+            content = doc.get('content', '')
+            # Ограничиваем длину контента чтобы влезло в контекст модели
+            content_snippet = content[:500] + "..." if len(content) > 500 else content
+            
+            context_text += f"--- Документ {i}: {title} ---\n{content_snippet}\n\n"
+            
+        prompt = SYSTEM_PROMPT_SEARCH.format(context=context_text, query=query)
+        
+        try:
+            logger.info(f"Generating answer for query: '{query}' with {len(context_docs)} docs")
+            return self._run_llm("Ты полезный ассистент.", prompt)
+        except Exception as e:
+            logger.error(f"Answer generation failed: {e}")
+            return "Не удалось сформировать ответ из-за внутренней ошибки."

@@ -11,9 +11,17 @@
 └─────────────┘     └──────────────┘     └─────────────┘     └──────────────┘     └────────────┘
        │                   │                    │                     │                    │
        ▼                   ▼                    ▼                     ▼                    ▼
-   Buttons Menu       audio.ogg         transcription.txt      structured.md        categories/
-   (Categories,      (conversion)        (record / sum)        (JSON parsing)       ├─ [динамические]
-    Stats, etc)                                                                     └─ инбокс/
+   Buttons Menu      audio.ogg        transcription.txt      structured.md        categories/
+   (Categories,     (conversion)       (record / sum)        (JSON parsing)       ├─ [динамические]
+    Search,                                                       │               └─ инбокс/
+     Stats)                                                       ▼
+                                                             Vector Store
+                                                            (Qdrant Local)
+                                                                  ▲
+                                                                  │
+                                                            Embedding Model
+                                                           (nomic-embed-text)
+```
 ```
 
 ---
@@ -118,6 +126,21 @@ takopi pull qwen2.5:3b
 
 ---
 
+### 1.5 Semantic Search Engine
+**Назначение:** Поиск заметок по смыслу
+
+**Технологии:**
+- **Embeddings**: `nomic-embed-text` (через Ollama)
+- **Vector DB**: Qdrant (Embedded mode, локальное хранилище в `./data/qdrant_db`)
+
+**Процесс:**
+1. При сохранении заметки генерируется вектор (embedding) из заголовка и текста.
+2. Вектор + метаданные сохраняются в Qdrant.
+3. При поиске запрос также превращается в вектор.
+4. Выполняется Cosine Similarity поиск ближайших векторов.
+
+---
+
 ### 1.4 File Manager
 **Назначение:** Сохранение структурированных заметок
 
@@ -202,13 +225,13 @@ async def process_voice_message(update, context):
     processed = await semantic_process(transcription)
     
     # 6. Сохранение
-    file_path = save_note(
-        category=processed['category'],
-        title=processed['title'],
-        content=processed['content']
-    )
+    file_path = save_note(...)
     
-    # 7. Подтверждение
+    # 7. Индексация (Асинхронно)
+    embedding = get_embedding(processed['title'] + processed['content'])
+    save_to_qdrant(embedding, metadata)
+    
+    # 8. Подтверждение
     category_emoji = {
         'идеи': '💡',
         'жизнь': '🌱',
@@ -574,6 +597,11 @@ def check_resources():
     return True
 ```
 
+### 5.5 Оптимизация поиска
+- Используется легковесная модель `nomic-embed-text` (быстрая генерация)
+- Qdrant в режиме Embedded не требует отдельного процесса/контейнера
+- Индексы сохраняются на диске, потребление RAM минимально (~50-100MB для тысяч заметок)
+
 ---
 
 ## 6. Технический стек
@@ -602,7 +630,8 @@ loguru==0.7.2
 ```bash
 brew install ffmpeg
 brew install whisper.cpp  # или компиляция из исходников
-brew install takopi       # или pip install takopi
+brew install ollama
+```
 ```
 
 ### 6.2 Структура проекта
@@ -635,6 +664,7 @@ ai-notes/
 ├── data/
 │   ├── audio/               # Временные аудио файлы
 │   ├── transcriptions/      # Временные транскрипции
+│   ├── qdrant_db/           # Векторная база данных
 │   └── logs/                # Логи
 ├── models/
 │   └── whisper/             # Модели whisper
@@ -663,6 +693,10 @@ ALLOWED_USER_ID=123456789  # Ваш Telegram User ID
 WHISPER_MODEL_PATH=./models/whisper/ggml-large-v3.bin
 NOTES_DIR=/Users/yourusername/notes
 TEMP_DIR=./data
+QDRANT_PATH=./data/qdrant_db
+
+# Embeddings
+OLLAMA_EMBEDDING_MODEL=nomic-embed-text
 
 # Whisper настройки
 WHISPER_LANGUAGE=ru

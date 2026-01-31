@@ -51,6 +51,9 @@ async def shutdown(application: Application):
         await application.stop()
         
     # Финальная очистка ресурсов
+    if 'handlers' in application.bot_data:
+        await application.bot_data['handlers'].shutdown()
+        
     await application.shutdown()
     
     logger.info("Bot stopped")
@@ -76,8 +79,12 @@ async def main():
         )
         
         # Регистрация обработчиков
+        # Регистрация обработчиков
         handlers = BotHandlers()
         handlers.register_handlers(application)
+        
+        # Сохраняем handlers для доступа при выключении
+        application.bot_data['handlers'] = handlers
         
         logger.info("Starting bot polling...")
         

@@ -3,6 +3,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+import re
 from loguru import logger
 from telegram import Update
 from telegram.ext import (
@@ -21,9 +22,10 @@ from processors import (
     AudioProcessor,
     WhisperTranscriber,
     SemanticProcessor,
-    TranscriptionValidator
+    TranscriptionValidator,
+    OllamaEmbeddings
 )
-from storage import FileManager
+from storage import FileManager, VectorStore
 from utils import check_resources
 from .auth import authorized_filter, is_authorized_update
 
@@ -40,6 +42,11 @@ class BotHandlers:
         self.semantic_processor = SemanticProcessor()
         self.file_manager = FileManager()
         self.validator = TranscriptionValidator()
+        self.embeddings = OllamaEmbeddings()
+        self.vector_store = VectorStore()
+        
+        # Initialize vector collection
+        self.vector_store.init_collection()
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Команда /start"""
@@ -55,6 +62,8 @@ class BotHandlers:
             "   - **'Запиши'** ... - записать дословно\n"
             "   - **'Перескажи'** ... - сделать конспект (по умолчанию)\n"
             "3. Я обработаю аудио и сохраню заметку\n\n"
+            "🔍 **Поиск голосом:**\n"
+            "Скажите **'Найди ...'** или **'Где ...'**, чтобы получить ответ на вопрос по вашим заметкам.\n\n"
             "📚 **Доступные команды:**\n"
             "/start - Справка\n"
             "/add\_category <имя> - Создать новую категорию\n"
@@ -66,6 +75,7 @@ class BotHandlers:
         )
         
         keyboard = [
+            ['🔍 Поиск'],
             ['📊 Статистика', '📂 Категории'],
             ['➕ Добавить категорию', '💚 Состояние']
         ]
@@ -138,7 +148,110 @@ class BotHandlers:
             transcription = self.validator.clean_transcription(transcription)
             logger.debug(f"Transcription: {transcription[:100]}...")
             
-            # 4. Семантическая обработка
+            # Проверка на режим "Найди" / "Поиск"
+            lower_trans = transcription.lower().strip()
+            if lower_trans.startswith(('найди', 'найти', 'поиск', 'ищи', 'где', 'расскажи')):
+                await status_msg.edit_text("🔍 Ищу ответ в заметках...")
+                
+                # Извлекаем запрос и очищаем от мусора
+                # 1. Удаляем триггер-слова
+                query = re.sub(r'^(найди|найти|поиск|ищи|где|расскажи)', '', transcription, flags=re.IGNORECASE).strip()
+                
+                # 2. Удаляем вводные слова ("информацию про", "пожалуйста", "все о" и т.д.)
+                # Повторяем несколько раз, так как порядок может быть разным (найди пожалуйста информацию про...)
+                clean_patterns = [
+                    r'^(пожалуйста|мне|нам|быстро|срочно)\s*',
+                    r'^(информацию|данные|заметки|заметку|все|всё|что-нибудь|что-то|ответ)\s*', 
+                    r'^(про|о|об|на тему|касательно)\s*',
+                    r'^(то,?|том,?)\s*',
+                    r'^(как|где|что)\s+(?=работает|находится|лежит|это)' # Оставляем "как" если это часть вопроса "как работают...", но удаляем если просто связка. Хотя "как работают" это сам вопрос. Не будем удалять вопросительные слова.
+                ]
+                
+                for pattern in clean_patterns:
+                    query = re.sub(pattern, '', query, flags=re.IGNORECASE).strip()
+                
+                if not query:
+                    await status_msg.edit_text("❓ Вы сказали 'Найди', но не уточнили что именно.")
+                    return
+
+                logger.info(f"Cleaned search query: '{query}'")
+
+                # 1. Получаем эмбеддинг запроса
+                query_embedding = await self.embeddings.get_embedding(query)
+                
+                if not query_embedding:
+                    await status_msg.edit_text("❌ Ошибка при поиске (Embeddings failed)")
+                    return
+                
+                # 2. Ищем релевантные заметки (Повышаем порог до 0.55)
+                results = self.vector_store.search(query_vector=query_embedding, limit=10, score_threshold=0.55)
+                
+                # Логируем результаты для отладки
+                if results:
+                    for i, hit in enumerate(results):
+                        logger.info(f"Search hit {i}: score={hit.score}, title={hit.payload.get('title')}, path={hit.payload.get('path')}")
+                
+                if not results:
+                     await status_msg.edit_text(f"🔍 По запросу '{query}' ничего не найдено (score < 0.55).")
+                     return
+                
+                # 3. Группируем результаты по файлам и берем только топ-2 уникальных источника
+                unique_results = {}
+                for hit in results:
+                    path_str = hit.payload.get('path')
+                    if path_str and path_str not in unique_results:
+                        unique_results[path_str] = hit
+                        if len(unique_results) >= 2:
+                            break
+                
+                # 4. Формируем контекст для LLM из уникальных источников
+                context_docs = []
+                sources_paths = []
+                
+                for path_str, hit in unique_results.items():
+                    doc = {
+                        'title': hit.payload.get('title'),
+                        'content': hit.payload.get('content', '')
+                    }
+                    
+                    # Читаем контент файла
+                    path_obj = Path(path_str)
+                    if path_obj.exists():
+                        try:
+                            content = path_obj.read_text(encoding='utf-8')
+                            doc['content'] = content
+                            context_docs.append(doc)
+                            sources_paths.append(path_obj)
+                        except Exception as e:
+                            logger.error(f"Failed to read file {path_str}: {e}")
+
+                if not context_docs:
+                    await status_msg.edit_text("❌ Не удалось прочитать найденные файлы.")
+                    return
+                
+                # 5. Генерация ответа
+                answer = self.semantic_processor.generate_answer_from_context(query, context_docs)
+                
+                final_response = f"🤖 **Ответ:**\n{answer}\n\n📂 Файлы с источниками ниже:"
+                await status_msg.edit_text(final_response, parse_mode='Markdown')
+                
+                # Отправка самих файлов
+                if sources_paths:
+                    for path in sources_paths[:5]: # Ограничение 5 файлов чтоб не спамить
+                        try:
+                            await update.message.reply_document(document=path)
+                        except Exception as e:
+                            logger.error(f"Failed to send file {path}: {e}")
+                
+                # Удаляем аудио, так как это был поисковый запрос
+                try:
+                    temp_ogg.unlink()
+                    wav_path.unlink()
+                except:
+                    pass
+                return
+
+            # 4. Семантическая обработка (обычный режим заметки)
             await status_msg.edit_text("🤖 Обрабатываю текст...")
             
             # Получаем актуальные категории
@@ -167,6 +280,30 @@ class BotHandlers:
             
             await status_msg.edit_text(success_message, parse_mode='Markdown')
             logger.info(f"Note saved successfully: {file_path}")
+            
+            # 7. Индексация для поиска
+            try:
+                # Combine title and content for better context
+                full_text = f"{processed['title']}\n\n{processed['content']}"
+                embedding = await self.embeddings.get_embedding(full_text)
+                
+                if embedding:
+                    self.vector_store.add_note(
+                        note_id=str(file_path),
+                        vector=embedding,
+                        payload={
+                            "category": processed['category'],
+                            "title": processed['title'],
+                            "created_at": timestamp.isoformat(),
+                            "path": str(file_path)
+                        }
+                    )
+                    logger.info(f"Note indexed for search: {file_path.name}")
+                else:
+                    logger.warning(f"Failed to generate embedding for {file_path.name}")
+            except Exception as e:
+                logger.error(f"Indexing failed for {file_path.name}: {e}")
+            
             
             # Опционально: удаление временных файлов
             try:
@@ -205,37 +342,70 @@ class BotHandlers:
         logger.info("Stats requested")
     
     async def search(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Команда /search - поиск по заметкам"""
+        """Команда /search и кнопка Поиск"""
         if not is_authorized_update(update):
             await update.message.reply_text("❌ Доступ запрещен")
             return
         
-        if not context.args:
-            await update.message.reply_text(
-                "Использование: /search <запрос>\n"
-                "Пример: /search важная встреча"
-            )
+        # Если команда вызвана без аргументов или кнопкой
+        if not context.args and update.message.text == '🔍 Поиск':
+            await update.message.reply_text("🔎 Отправьте текст для поиска...")
+            return
+
+        query = ' '.join(context.args) if context.args else update.message.text
+        
+        # Игнорируем саму команду /search в тексте если она есть
+        if query.startswith('/search'):
+            query = query[7:].strip()
+            
+        if not query:
+            await update.message.reply_text("🔎 Введите поисковый запрос после команды /search")
+            return
+
+        await update.message.reply_text(f"🔎 Ищу: '{query}'...")
+        
+        # Генерируем embedding запроса
+        query_embedding = await self.embeddings.get_embedding(query)
+        
+        if not query_embedding:
+            await update.message.reply_text("❌ Не удалось обработать запрос (ошибка Embeddings)")
+            return
+            
+        # Поиск в векторной базе (Используем новый порог)
+        results = self.vector_store.search(query_vector=query_embedding, limit=10, score_threshold=0.55)
+        
+        # Фильтруем уникальные пути
+        unique_hits = []
+        seen_paths = set()
+        for hit in results:
+            path = hit.payload.get('path')
+            if path and path not in seen_paths:
+                seen_paths.add(path)
+                unique_hits.append(hit)
+                if len(unique_hits) >= 2: # Максимум 2 источника
+                    break
+
+        if not unique_hits:
+            await update.message.reply_text(f"🔍 По запросу '{query}' ничего не найдено (score < 0.55)")
             return
         
-        query = ' '.join(context.args)
-        results = self.file_manager.search_notes(query)
+        message = f"🔍 **Результаты поиска (топ-{len(unique_hits)}):**\n\n"
         
-        if not results:
-            await update.message.reply_text(f"🔍 По запросу '{query}' ничего не найдено")
-            return
-        
-        message = f"🔍 Найдено заметок: {len(results)}\n\n"
-        
-        for i, file_path in enumerate(results[:10], 1):
-            category = file_path.parent.name
+        for i, hit in enumerate(unique_hits, 1):
+            score = hit.score
+            payload = hit.payload
+            title = payload.get('title', 'Без названия')
+            category = payload.get('category', 'инбокс')
+            path_str = payload.get('path', '')
+            
+            # Получаем имя файла из пути
+            filename = Path(path_str).name if path_str else '???'
+            
             emoji = Settings.CATEGORY_EMOJI.get(category, '📝')
-            message += f"{i}. {emoji} `{file_path.name}`\n"
-        
-        if len(results) > 10:
-            message += f"\n... и ещё {len(results) - 10}"
+            message += f"{i}. {emoji} **{title}** ({score:.2f})\n   `{filename}`\n"
         
         await update.message.reply_text(message, parse_mode='Markdown')
-        logger.info(f"Search: '{query}' - {len(results)} results")
+        logger.info(f"Semantic search: '{query}' - {len(results)} results")
     
 
     
@@ -405,6 +575,12 @@ class BotHandlers:
             )
         )
         application.add_handler(
+                MessageHandler(
+                    filters.Regex('^🔍 Поиск$') & authorized_filter,
+                    self.search
+                )
+            )
+        application.add_handler(
             MessageHandler(
                 filters.Regex('^📂 Категории$') & authorized_filter,
                 self.list_categories
@@ -430,4 +606,19 @@ class BotHandlers:
         # Обработчик ошибок
         application.add_error_handler(self.error_handler)
         
+        # Обработчик текстовых сообщений (если не команда) - можно использовать для поиска
+        application.add_handler(
+            MessageHandler(
+                filters.TEXT & ~filters.COMMAND & authorized_filter,
+                self.search
+            )
+        )
+        
         logger.info("All handlers registered")
+
+    async def shutdown(self):
+        """Cleanup resources"""
+        if self.embeddings:
+            await self.embeddings.close()
+        if self.vector_store:
+            self.vector_store.close()

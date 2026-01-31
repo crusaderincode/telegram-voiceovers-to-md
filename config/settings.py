@@ -45,6 +45,16 @@ class Settings:
     
     # Очистка
     CLEANUP_TEMP_FILES_HOURS: int = int(os.getenv('CLEANUP_TEMP_FILES_HOURS', '24'))
+
+    # Embeddings (Ollama)
+    OLLAMA_BASE_URL: str = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+    OLLAMA_EMBEDDING_MODEL: str = os.getenv('OLLAMA_EMBEDDING_MODEL', 'nomic-embed-text')
+    
+    # Vector Store (Qdrant)
+    # Используем локальный путь для Qdrant (embedded mode) по умолчанию
+    QDRANT_PATH: Path = Path(os.getenv('QDRANT_PATH', './data/qdrant_db'))
+    QDRANT_COLLECTION_NAME: str = os.getenv('QDRANT_COLLECTION_NAME', 'notes')
+    QDRANT_SCORE_THRESHOLD: float = float(os.getenv('QDRANT_SCORE_THRESHOLD', '0.55'))
     
     # Категории
 

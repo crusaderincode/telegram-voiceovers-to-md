@@ -18,3 +18,7 @@ requests==2.31.0
 
 # Работа с JSON
 orjson==3.9.10
+
+# Vector Database & Embeddings
+qdrant-client
+httpx==0.25.2

@@ -74,6 +74,13 @@ if ollama list 2>/dev/null | grep -q "qwen2.5:3b"; then
 else
     echo "   ❌ Qwen model not found"
 fi
+
+# Embeddings
+if ollama list 2>/dev/null | grep -q "nomic-embed-text"; then
+    echo "   ✓ Embedding model installed"
+else
+    echo "   ❌ Embedding model not found"
+fi
 echo ""
 
 # 4. Configuration
@@ -103,7 +110,7 @@ echo ""
 # 5. Directories
 echo "5️⃣  Directory Structure"
 
-DIRS=("notes/идеи" "notes/жизнь" "notes/работа" "notes/инбокс" "data/audio" "data/transcriptions" "data/logs")
+DIRS=("notes/идеи" "notes/жизнь" "notes/работа" "notes/инбокс" "data/audio" "data/transcriptions" "data/logs" "data/qdrant_db")
 
 for dir in "${DIRS[@]}"; do
     if [ -d "$dir" ]; then
