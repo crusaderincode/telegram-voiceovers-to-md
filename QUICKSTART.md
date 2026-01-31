@@ -87,7 +87,7 @@ python test_components.py
 Ctrl+C (в терминале где запущен бот)
 
 # Обновление индекса поиска
-python scripts/reindex.py
+./scripts/index.sh
 ```
 
 ## ⚠️ Возможные проблемы
